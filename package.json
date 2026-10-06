@@ -1,0 +1,24 @@
+{
+  "name": "web-lab3",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/1nputlag/web-lab3.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/1nputlag/web-lab3/issues"
+  },
+  "homepage": "https://github.com/1nputlag/web-lab3#readme",
+  "dependencies": {
+    "commander": "^15.0.0"
+  }
+}

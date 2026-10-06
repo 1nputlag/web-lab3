@@ -1,0 +1,41 @@
+{
+  "groupName": "ФЕІ-21",
+  "semester": 3,
+  "classes": [
+    {
+      "dayOfWeek": "Monday",
+      "pairNumber": 1,
+      "weekType": "numerator",
+      "isRemote": false,
+      "subject": {
+        "name": "Object-Oriented Programming (C++)",
+        "type": "Lab"
+      },
+      "teacher": {
+        "firstName": "Олександр",
+        "lastName": "Шевченко",
+        "title": "Docent"
+      },
+      "location": {
+        "building": "Драгоманова, 50",
+        "room": "301"
+      }
+    },
+    {
+      "dayOfWeek": "Tuesday",
+      "pairNumber": 2,
+      "weekType": null,
+      "isRemote": true,
+      "subject": {
+        "name": "Numerical Methods",
+        "type": "Lecture"
+      },
+      "teacher": {
+        "firstName": "Марія",
+        "lastName": "Коваль",
+        "title": null
+      },
+      "location": null
+    }
+  ]
+}
