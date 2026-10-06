@@ -59,7 +59,7 @@ function getNestedValue(obj, pathString) {
   return current;
 }
 
-// ЧАСТИНА 3. Загальні можливості (усі варіанти)
+// ЧАСТИНА 3. Загальні можливості (list, get, field)
 // 1. Команда 'list' - стислий список елементів з можливістю обмеження
 program
   .command('list')
