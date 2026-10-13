@@ -1,231 +1,227 @@
-import { Command } from 'commander';
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import { Command } from 'commander';   // пакет commander: розбір аргументів командного рядка
+import fs from 'node:fs/promises';     // вбудований модуль для роботи з файлами (асинхронний)
+import path from 'node:path';          // вбудований модуль для роботи зі шляхами
 
-const program = new Command();
+const program = new Command();   // головний об'єкт програми
 
-// Налаштування метаданих програми
 program
-  .name('schedule-cli')
-  .description('CLI-програма для роботи з розкладом навчальних занять')
-  .version('1.0.0');
+  .name('schedule-cli')   // назва програми (показується в довідці)
+  .description('CLI-програма для роботи з розкладом навчальних занять')   // опис програми
+  .version('1.0.0', '-V, --version', 'показати версію програми')   // версія; прапорець і опис українською
+  .helpOption('-h, --help', 'показати довідку')   // прапорець довідки з українським описом
+  .helpCommand('help [command]', 'показати довідку для команди');   // команда help з українським описом
 
-// Глобальна опція для вибору JSON-файлу (працює з будь-якою командою)
 program.option(
-  '-f, --file <path>',
-  'шлях до вхідного JSON-файлу з розкладом',
-  'schedule.json'
+  '-f, --file <path>',                       // глобальна опція зі значенням: працює з будь-якою командою
+  'шлях до вхідного JSON-файлу з розкладом', // опис опції
+  'schedule.json'                            // значення за замовчуванням
 );
 
-// Функція для безпечного читання JSON-файлу з обробкою помилок
-async function loadData() {
-  const options = program.opts();
-  const filePath = path.resolve(options.file);
+function fail(message) {   // вивести помилку і завершити програму
+  console.error(`Помилка: ${message}`);   // повідомлення українською в потік помилок
+  process.exit(1);   // код 1 = невдале завершення (без стеку викликів)
+}
+
+async function loadData() {   // прочитати JSON-файл і повернути його як об'єкт
+  const filePath = path.resolve(program.opts().file);   // шлях з опції --file перетворюємо на абсолютний
+
+  let text;   // сюди запишемо вміст файлу
+  try {
+    text = await fs.readFile(filePath, 'utf-8');   // читаємо файл як текст і чекаємо результату
+  } catch (error) {
+    if (error.code === 'ENOENT') {   // ENOENT = файл не існує
+      fail(`Файл за шляхом "${filePath}" не знайдено.`);
+    }
+    fail(`Не вдалося прочитати файл "${filePath}": ${error.message}`);   // будь-яка інша помилка читання
+  }
 
   try {
-    const rawContent = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(rawContent);
+    return JSON.parse(text);   // перетворюємо текст на об'єкт
   } catch (error) {
-    if (error.code === 'ENOENT') {
-      console.error(`Помилка: Файл за шляхом "${filePath}" не знайдено.`);
-    } else if (error instanceof SyntaxError) {
-      console.error(`Помилка: Файл "${filePath}" містить некоректний синтаксис JSON.`);
-    } else {
-      console.error(`Помилка під час читання файла: ${error.message}`);
-    }
-    process.exit(1); // Ненульовий код завершення
+    fail(`Файл "${filePath}" містить некоректний синтаксис JSON.`);   // JSON.parse кинув помилку: хибний синтаксис
   }
 }
 
-// Допоміжна функція для отримання масиву занять з об'єкта
-function getClasses(data) {
-  if (Array.isArray(data)) return data;
-  if (data && Array.isArray(data.classes)) return data.classes;
-  console.error('Помилка: У JSON-файлі відсутній масив занять "classes".');
-  process.exit(1);
+function getClasses(data) {   // дістати масив занять з даних
+  if (data && Array.isArray(data.classes)) {   // у даних має бути масив classes
+    return data.classes;
+  }
+  fail('У JSON-файлі відсутній масив занять "classes".');
 }
 
-// Допоміжна функція для роботи з вкладеними полями (наприклад: teacher.lastName)
-function getNestedValue(obj, pathString) {
-  const keys = pathString.split('.');
-  let current = obj;
+function parsePositiveInt(text) {   // рядок -> додатне ціле число, або null, якщо рядок некоректний
+  if (!/^\d+$/.test(text)) {   // має складатися лише з цифр ("abc", "1.5", "1abc", "-2" не проходять)
+    return null;
+  }
+  const number = Number(text);   // перетворюємо рядок на число
+  if (number === 0) {   // нуль не підходить: нумерація з 1
+    return null;
+  }
+  return number;
+}
 
-  for (const key of keys) {
-    if (current === null || current === undefined || !(key in current)) {
+function getClassByNumber(classes, numberText) {   // взяти заняття за номером (нумерація з 1)
+  const number = parsePositiveInt(numberText);   // перевіряємо, що це додатне ціле
+  if (number === null) {
+    fail('Номер заняття має бути додатним цілим числом.');
+  }
+  if (number > classes.length) {   // номер більший за кількість занять
+    fail(`Заняття з номером ${number} не знайдено (усього занять: ${classes.length}).`);
+  }
+  return classes[number - 1];   // у масиві нумерація з 0, тому віднімаємо 1
+}
+
+function getNestedValue(item, fieldPath) {   // дістати поле за шляхом через крапку (teacher.lastName)
+  let current = item;   // починаємо з самого заняття
+
+  for (const key of fieldPath.split('.')) {   // "teacher.lastName" -> ["teacher", "lastName"]
+    if (current === null || typeof current !== 'object') {   // углиб можна йти лише в об'єкт
       return undefined;
     }
-    current = current[key];
+    if (!Object.hasOwn(current, key)) {   // чи є такий ключ у самому об'єкті
+      return undefined;   // undefined = поля немає (а значення null означає "поле є, але порожнє")
+    }
+    current = current[key];   // переходимо на крок углиб
   }
+
   return current;
 }
 
-// ЧАСТИНА 3. Загальні можливості (list, get, field)
-// 1. Команда 'list' - стислий список елементів з можливістю обмеження
+function normalizeWeekType(text) {   // привести тип тижня до numerator / denominator
+  const value = text.toLowerCase();   // регістр не важливий
+
+  if (value === 'numerator' || value === 'чисельник') {
+    return 'numerator';
+  }
+  if (value === 'denominator' || value === 'знаменник') {
+    return 'denominator';
+  }
+  return null;   // некоректне значення
+}
+
 program
-  .command('list')
-  .description('Показати стислий перелік занять з розкладу')
-  .option('-l, --limit <number>', 'обмежити кількість відображених занять', parseInt)
-  .action(async (options) => {
-    const data = await loadData();
-    const classes = getClasses(data);
-
-    if (options.limit !== undefined && (isNaN(options.limit) || options.limit <= 0)) {
-      console.error('Помилка: Значення опції --limit має бути додатним числом.');
-      process.exit(1);
+  .command('list')   // команда list
+  .description('Показати стислий перелік занять з розкладу')   // опис команди
+  .option('-l, --limit <number>', 'обмежити кількість відображених занять')   // опція зі значенням
+  .action(async (options) => {   // що виконується при запуску команди
+    let limit = null;   // null = без обмеження
+    if (options.limit !== undefined) {   // користувач вказав --limit
+      limit = parsePositiveInt(options.limit);   // перевіряємо значення до читання файлу
+      if (limit === null) {
+        fail('Значення опції --limit має бути додатним числом.');
+      }
     }
 
-    let result = classes;
-    if (options.limit) {
-      result = classes.slice(0, options.limit);
+    const data = await loadData();   // читаємо файл
+    const classes = getClasses(data);   // беремо масив занять
+
+    let shown = classes;   // за замовчуванням показуємо всі заняття
+    if (limit !== null) {
+      shown = classes.slice(0, limit);   // або перші N
     }
 
-    console.log(`Група: ${data.groupName || 'Н/Д'}, Семестр: ${data.semester || 'Н/Д'}`);
-    console.log(`--- Перелік занять (всього: ${classes.length}, показано: ${result.length}) ---`);
+    console.log(`Група: ${data.groupName}, Семестр: ${data.semester}`);   // заголовок з метаданими
+    console.log(`--- Перелік занять (всього: ${classes.length}, показано: ${shown.length}) ---`);
 
-    result.forEach((cls, index) => {
-      const subjectName = cls.subject?.name || 'Без назви';
-      const type = cls.subject?.type ? `(${cls.subject.type})` : '';
-      const day = cls.dayOfWeek || 'Н/Д';
-      const pair = cls.pairNumber ? `пара №${cls.pairNumber}` : '';
-      console.log(`[#${index + 1}] ${day}, ${pair}: ${subjectName} ${type}`);
+    shown.forEach((item, i) => {   // один рядок на заняття; i — індекс з 0
+      console.log(`[#${i + 1}] ${item.dayOfWeek}, пара №${item.pairNumber}: ${item.subject.name} (${item.subject.type})`);
     });
   });
 
-// 2. Команда 'get' - вивід одного елемента за порядковим номером (починаючи з 1)
 program
-  .command('get <index>')
-  .description('Показати повну інформацію про один елемент розкладу за його порядковим номером (1, 2...)')
-  .action(async (indexStr) => {
-    const index = parseInt(indexStr, 10);
-    if (isNaN(index) || index <= 0) {
-      console.error('Помилка: Номер елемента має бути додатним цілим числом.');
-      process.exit(1);
-    }
-
+  .command('get <index>')   // обов'язковий аргумент index (кутові дужки)
+  .description('Показати повну інформацію про одне заняття за його порядковим номером (1, 2...)')
+  .action(async (index) => {
     const data = await loadData();
-    const classes = getClasses(data);
+    const item = getClassByNumber(getClasses(data), index);   // заняття за номером (з перевірками)
 
-    if (index > classes.length) {
-      console.error(`Помилка: Заняття з номером ${index} не знайдено (усього занять: ${classes.length}).`);
-      process.exit(1);
-    }
-
-    const item = classes[index - 1];
     console.log(`--- Інформація про заняття #${index} ---`);
-    console.log(JSON.stringify(item, null, 2));
+    console.log(JSON.stringify(item, null, 2));   // гарний JSON з відступами у 2 пробіли
   });
 
-// 3. Команда 'field' - вивід значення окремого (зокрема вкладеного) поля
 program
-  .command('field <index> <fieldPath>')
-  .description('Показати значення окремого поля для заняття (наприклад: 1 teacher.lastName або 2 location)')
-  .action(async (indexStr, fieldPath) => {
-    const index = parseInt(indexStr, 10);
-    if (isNaN(index) || index <= 0) {
-      console.error('Помилка: Номер елемента має бути додатним цілим числом.');
-      process.exit(1);
-    }
-
+  .command('field <index> <fieldPath>')   // два обов'язкові аргументи: номер і шлях до поля
+  .description('Показати значення поля заняття (наприклад: 1 teacher.lastName або 2 location)')
+  .action(async (index, fieldPath) => {
     const data = await loadData();
-    const classes = getClasses(data);
+    const item = getClassByNumber(getClasses(data), index);
+    const value = getNestedValue(item, fieldPath);   // значення поля або undefined
+    const title = `Значення поля "${fieldPath}" для заняття #${index}`;   // початок повідомлення
 
-    if (index > classes.length) {
-      console.error(`Помилка: Заняття з номером ${index} не знайдено.`);
-      process.exit(1);
-    }
-
-    const item = classes[index - 1];
-    const value = getNestedValue(item, fieldPath);
-
-    if (value === undefined) {
-      console.error(`Помилка: Поле "${fieldPath}" відсутнє у занятті #${index}.`);
-      process.exit(1);
-    }
-
-    if (value === null) {
-      console.log(`Значення поля "${fieldPath}" для заняття #${index}: null (значення явно відсутнє).`);
-    } else if (typeof value === 'object') {
-      console.log(`Значення поля "${fieldPath}" для заняття #${index}:\n${JSON.stringify(value, null, 2)}`);
-    } else {
-      console.log(`Значення поля "${fieldPath}" для заняття #${index}: ${value}`);
+    if (value === undefined) {   // поля немає взагалі: помилка
+      fail(`Поле "${fieldPath}" відсутнє у занятті #${index}.`);
+    } else if (value === null) {   // поле є, але дорівнює null: нормальний результат
+      console.log(`${title}: null (значення явно відсутнє).`);
+    } else if (typeof value === 'object') {   // вкладений об'єкт показуємо як JSON
+      console.log(`${title}:\n${JSON.stringify(value, null, 2)}`);
+    } else {   // рядок, число або boolean
+      console.log(`${title}: ${value}`);
     }
   });
 
-//  ЧАСТИНА 4. Можливості Варіанта 1 (Розклад занять)
-// Можливість 1: Заняття за обраний день тижня
 program
-  .command('day <dayOfWeek>')
+  .command('day <dayOfWeek>')   // обов'язковий аргумент: день тижня
   .description('Показати всі заняття для обраного дня тижня (наприклад: Monday, Tuesday)')
   .action(async (dayOfWeek) => {
     const data = await loadData();
     const classes = getClasses(data);
 
-    const filtered = classes.filter(
-      (cls) => cls.dayOfWeek && cls.dayOfWeek.toLowerCase() === dayOfWeek.toLowerCase()
-    );
+    const found = classes.filter((item) => {   // залишаємо заняття потрібного дня
+      return item.dayOfWeek.toLowerCase() === dayOfWeek.toLowerCase();   // без урахування регістру
+    });
 
-    if (filtered.length === 0) {
+    if (found.length === 0) {   // нічого не знайдено: це не помилка, код завершення 0
       console.log(`Заняття на день "${dayOfWeek}" відсутні.`);
       return;
     }
 
-    console.log(`--- Заняття на день: ${dayOfWeek} (знайдено: ${filtered.length}) ---`);
-    console.log(JSON.stringify(filtered, null, 2));
+    console.log(`--- Заняття на день: ${dayOfWeek} (знайдено: ${found.length}) ---`);
+    console.log(JSON.stringify(found, null, 2));
   });
 
-// Можливість 2: Заняття певного викладача з можливістю відбору лише дистанційних
 program
-  .command('teacher <lastName>')
-  .description('Показати розклад конкретного викладача за прізвищем')
-  .option('-r, --remote-only', 'відобразити лише дистанційні заняття')
+  .command('teacher <lastName>')   // обов'язковий аргумент: прізвище
+  .description('Показати розклад викладача за прізвищем (або його частиною)')
+  .option('-r, --remote-only', 'показати лише дистанційні заняття')   // прапорець без значення
   .action(async (lastName, options) => {
     const data = await loadData();
     const classes = getClasses(data);
 
-    let filtered = classes.filter((cls) => {
-      const teacherLastName = cls.teacher?.lastName || '';
-      return teacherLastName.toLowerCase().includes(lastName.toLowerCase());
+    let found = classes.filter((item) => {   // відбір за прізвищем
+      return item.teacher.lastName.toLowerCase().includes(lastName.toLowerCase());   // збіг за частиною, без регістру
     });
 
-    if (options.remoteOnly) {
-      filtered = filtered.filter((cls) => cls.isRemote === true);
+    if (options.remoteOnly) {   // прапорець -r: commander перетворив --remote-only на remoteOnly
+      found = found.filter((item) => item.isRemote === true);   // лишаємо лише дистанційні
     }
 
-    if (filtered.length === 0) {
+    if (found.length === 0) {   // нічого не знайдено: код завершення 0
       console.log(`Заняття для викладача "${lastName}" не знайдено.`);
       return;
     }
 
-    console.log(`--- Заняття викладача "${lastName}" (знайдено: ${filtered.length}) ---`);
-    console.log(JSON.stringify(filtered, null, 2));
+    console.log(`--- Заняття викладача "${lastName}" (знайдено: ${found.length}) ---`);
+    console.log(JSON.stringify(found, null, 2));
   });
 
-// Можливість 3: Розклад для чисельника/знаменника з урахуванням щотижневих занять
 program
-  .command('week <type>')
+  .command('week <type>')   // обов'язковий аргумент: тип тижня
   .description('Показати розклад для чисельника (numerator) чи знаменника (denominator)')
   .action(async (type) => {
-    const normalizedType = type.toLowerCase();
-    const validTypes = ['numerator', 'denominator', 'чисельник', 'знаменник'];
-
-    if (!validTypes.includes(normalizedType)) {
-      console.error('Помилка: Тип тижня має бути "numerator", "denominator" (або "чисельник", "знаменник").');
-      process.exit(1);
+    const weekType = normalizeWeekType(type);   // numerator, denominator або null
+    if (weekType === null) {
+      fail('Тип тижня має бути "numerator", "denominator" (або "чисельник", "знаменник").');
     }
-
-    const targetType = (normalizedType === 'чисельник') ? 'numerator' : (normalizedType === 'знаменник') ? 'denominator' : normalizedType;
 
     const data = await loadData();
     const classes = getClasses(data);
 
-    // Пари, де weekType дорівнює потрібному АБО є null (щотижневі заняття)
-    const filtered = classes.filter(
-      (cls) => cls.weekType === null || cls.weekType.toLowerCase() === targetType
-    );
+    const found = classes.filter((item) => {   // беремо заняття потрібного типу тижня
+      return item.weekType === null || item.weekType === weekType;   // null = заняття щотижня, беремо завжди
+    });
 
-    console.log(`--- Розклад для тижня: ${targetType} (включно з щотижневими заняттями) ---`);
-    console.log(JSON.stringify(filtered, null, 2));
+    console.log(`--- Розклад для тижня: ${weekType} (включно з щотижневими заняттями) ---`);
+    console.log(JSON.stringify(found, null, 2));
   });
 
-// Обробка аргументів командного рядка
-program.parse(process.argv);
+program.parse(process.argv);   // запустити розбір командного рядка (завжди останній рядок)
